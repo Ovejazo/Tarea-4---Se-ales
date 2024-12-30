@@ -1,92 +1,41 @@
-% Read and parse JSON file
+% Leer el archivo JSON
 jsonStr = fileread('examples.json');
-jsonData = jsondecode(jsonStr);
+data = jsondecode(jsonStr);
 
-% Initialize counter for correctly detected notes
-correctCount = 0;
-totalCount = length(jsonData);
+% Obtener los nombres de los campos
+nombresCampos = fieldnames(data);
+totalArchivos = length(nombresCampos);
 
-% MIDI note to frequency conversion constants
-A4_MIDI = 69;    % MIDI note number for A4
-A4_FREQ = 440;   % A4 frequency in Hz
+fprintf('Total de archivos encontrados en JSON: %d\n\n', totalArchivos);
 
-% Iterate through each entry in the JSON structure
-fileNames = fieldnames(jsonData);
-
-for i = 1:length(fileNames)
-    currentFile = fileNames{i};
-    
-    % Construct full filename with .wav extension
-    audioFileName = fullfile([currentFile, '.wav']);
-    
+% Iterar sobre cada archivo
+for i = 1:totalArchivos
     try
-        % Read audio file
-        [y, fs] = audioread(audioFileName);
+        % Obtener el nombre del archivo del JSON
+        nombreJSON = nombresCampos{i};
+        fprintf('Procesando %d/%d: %s\n', i, totalArchivos, nombreJSON);
         
-        % Get ground truth MIDI pitch from JSON
-        truePitch = jsonData.(currentFile).pitch;
+        % Convertir el nombre al formato del archivo WAV
+        partes = split(nombreJSON, '_');
+        nombreWAV = sprintf('%s_%s_%s-%s-%s.wav', ...
+            partes{1}, partes{2}, partes{3}, partes{4}, partes{5});
         
-        % Take first 3 seconds of audio (where note is sustained)
-        samples = min(round(3 * fs), length(y));
-        signal = y(1:samples);
+        fprintf('Intentando leer: %s\n', nombreWAV);
         
-        % Convert stereo to mono if necessary
-        if size(signal, 2) > 1
-            signal = mean(signal, 2);
+        % Verificar si el archivo existe
+        if ~exist(nombreWAV, 'file')
+            fprintf('ERROR: El archivo %s no existe\n\n', nombreWAV);
+            continue;
         end
         
-        % Apply Hanning window to reduce spectral leakage
-        window = hanning(length(signal));
-        windowed_signal = signal .* window;
-        
-        % Compute FFT
-        N = length(windowed_signal);
-        Y = fft(windowed_signal);
-        
-        % Get magnitude spectrum (only first half due to symmetry)
-        P2 = abs(Y/N);
-        P1 = P2(1:floor(N/2)+1);
-        P1(2:end-1) = 2*P1(2:end-1);
-        
-        % Create frequency axis
-        f = fs * (0:(N/2))/N;
-        
-        % Find peaks in spectrum
-        [peaks, locs] = findpeaks(P1, 'MinPeakHeight', max(P1)*0.1);
-        
-        % Get frequency with maximum magnitude in the expected range (20Hz - 5000Hz)
-        validFreqs = f(locs);
-        validFreqs = validFreqs(validFreqs >= 20 & validFreqs <= 5000);
-        if ~isempty(validFreqs)
-            fundamental = validFreqs(1); % Take the lowest frequency peak
-        else
-            fundamental = 0;
-        end
-        
-        % Convert frequency to MIDI note number
-        if fundamental > 0
-            detectedPitch = round(12 * log2(fundamental/A4_FREQ) + A4_MIDI);
-        else
-            detectedPitch = 0;
-        end
-        
-        % Compare with ground truth
-        if detectedPitch == truePitch
-            correctCount = correctCount + 1;
-        end
-        
-        % Print progress and results for each file
-        fprintf('File: %s\n', currentFile);
-        fprintf('True Pitch: %d, Detected Pitch: %d\n', truePitch, detectedPitch);
+        % Leer el archivo de audio
+        [y, fs] = audioread(nombreWAV);
+        fprintf('Archivo leído correctamente. Longitud: %d muestras, Fs: %d Hz\n\n', length(y), fs);
         
     catch e
-        fprintf('Error processing file %s: %s\n', audioFileName, e.message);
-        continue;
+        fprintf('Error en archivo %d: %s\n', i, e.message);
+        fprintf('Detalles del error:\n');
+        fprintf('Línea: %d\n', e.stack(1).line);
+        fprintf('Función: %s\n\n', e.stack(1).name);
     end
 end
-
-% Calculate and display final accuracy
-accuracy = (correctCount / totalCount) * 100;
-fprintf('\nFinal Results:\n');
-fprintf('Correctly detected %d out of %d notes (%.2f%%)\n', ...
-        correctCount, totalCount, accuracy);
